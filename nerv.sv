@@ -384,6 +384,8 @@ module nerv #(
 	input  [31:0] irq
 );
 
+`include "tag_defs.vh" // Imports the 6 tag constants   
+
 `ifndef NERV_FAULT
 	wire imem_fault = 0;
 	wire dmem_fault = 0;
@@ -405,6 +407,9 @@ module nerv #(
 	reg [4:0] mem_rd_reg_q;
 	reg [4:0] mem_rd_func_q;
 
+	reg [2:0] mem_rd_tag; // 2 Cycle Memory Tag Pipeline 
+	reg [2:0] mem_rd_tag_q;
+
 	reg mem_wr_enable_q;
 
 	// delayed copies of mem_rd (and mem_wr for NERV_FAULTS)
@@ -412,11 +417,13 @@ module nerv #(
 		if (!stall) begin
 			mem_rd_enable_q <= mem_rd_enable;
 			mem_rd_reg_q <= mem_rd_reg;
-			mem_rd_func_q <= mem_rd_func;
+			mem_rd_func_q <= mem_rd_func; // 2 Cycle Memory Tag Pipeline 
+			mem_rd_tag_q <= mem_rd_tag; // Fixes the 2 cycle load problem. Latches the tag from Cycle 1 to Cycle 2
 			mem_wr_enable_q <= mem_wr_enable;
 		end
 		if (reset) begin
 			mem_rd_enable_q <= 0;
+			mem_rd_tag_q <= TAG_I32;
 		end
 	end
 
@@ -453,6 +460,13 @@ module nerv #(
 	// rs1 and rs2 are source for the instruction
 	wire [31:0] rs1_value = !insn_rs1 ? 0 : regfile[insn_rs1];
 	wire [31:0] rs2_value = !insn_rs2 ? 0 : regfile[insn_rs2];
+
+	// Tag wires (Signals connecting registers to the tag pipeline) 
+	wire [2:0]  rs1_tag;
+	wire [2:0]  rs2_tag;
+	reg  [2:0]  next_tag;
+	reg  [2:0]  wr_tag;
+	wire [31:0] next_rd_canonical;
 
 	// split R-type instruction - see section 2.2 of RiscV spec
 	assign {insn_funct7, insn_rs2, insn_rs1, insn_funct3, insn_rd, insn_opcode} = insn;
@@ -536,6 +550,26 @@ module nerv #(
 	reg next_wr;
 	reg [31:0] next_rd;
 	reg [4:0] wr_rd;
+
+	tag_regfile #( // Plugs into the register file to provide tags for each register
+		.NUMREGS(NUMREGS)
+	) u_tagfile (
+		.clock    (clock),
+		.reset    (reset),
+		.rs1_addr (insn_rs1),
+		.rs1_tag  (rs1_tag),
+		.rs2_addr (insn_rs2),
+		.rs2_tag  (rs2_tag),
+		.wr_en    (next_wr),
+		.wr_addr  (wr_rd),
+		.wr_tag   (wr_tag)
+	);
+
+	tag_canonicalizer u_canonicalizer ( // Converts the tag of the value being written to the register file into a canonical form for the register file
+		.in_val  (next_rd),
+		.in_tag  (wr_tag),
+		.out_val (next_rd_canonical)
+	);
 
 	// illegal instruction registers
 	reg illinsn;
@@ -659,6 +693,8 @@ module nerv #(
 		// defaults for read, write
 		next_wr = 0;
 		next_rd = 0;
+		next_tag = TAG_I32; // Default to I32 for next tag, can be changed later in the instruction decode
+		wr_tag = TAG_I32; // Default to I32 for write tag, can be changed later in the instruction decode
 		cycle_intr = 0;
 		cycle_trap = 0;
 		cycle_insn = 0;
@@ -679,6 +715,7 @@ module nerv #(
 		mem_rd_addr = 32'hx;
 		mem_rd_reg = 5'hx;
 		mem_rd_func = 5'hx;
+		mem_rd_tag = TAG_I32; // Default to I32 for memory read tag, can be changed later in the instruction decode
 
 `ifdef NERV_CSR
 		csr_ack = 0;
@@ -900,22 +937,24 @@ module nerv #(
 					npc = npc & ~32'b 11;
 				end
 			end
-			// load from memory into rd: Load Byte, Load Halfword, Load Word, Load Byte Unsigned, Load Halfword Unsigned
+			// load from memory into rd: Load Byte, Load Halfword, Load Word, Load Byte Unsigned, Load Halfword Unsigned, Load Word Unsigned
 			OPCODE_LOAD: begin
 				mem_rd_addr = rs1_value + imm_i_sext;
 				casez ({insn_funct3, mem_rd_addr[1:0]})
-					5'b 000_zz /* LB  */,
-					5'b 001_z0 /* LH  */,
-					5'b 010_00 /* LW  */,
-					5'b 100_zz /* LBU */,
-					5'b 101_z0 /* LHU */: begin
-						mem_rd_enable = 1;
-						mem_rd_reg = insn_rd;
-						mem_rd_func = {mem_rd_addr[1:0], insn_funct3};
-						mem_rd_addr = {mem_rd_addr[31:2], 2'b 00};
-					end
+					5'b 000_zz /* LB  */: begin mem_rd_tag = TAG_I8;  end // Assigns the appropriate tag for the load instruction based on the funct3 field and the address alignment
+					5'b 001_z0 /* LH  */: begin mem_rd_tag = TAG_I16; end
+					5'b 010_00 /* LW  */: begin mem_rd_tag = TAG_I32; end
+					5'b 100_zz /* LBU */: begin mem_rd_tag = TAG_U8;  end
+					5'b 101_z0 /* LHU */: begin mem_rd_tag = TAG_U16; end
+					5'b 110_00 /* LWU */: begin mem_rd_tag = TAG_U32; end
 					default: illinsn = 1;
 				endcase
+				if (!illinsn) begin
+					mem_rd_enable = 1;
+					mem_rd_reg = insn_rd;
+					mem_rd_func = {mem_rd_addr[1:0], insn_funct3};
+					mem_rd_addr = {mem_rd_addr[31:2], 2'b 00};
+				end
 			end
 			// store to memory instructions: Store Byte, Store Halfword, Store Word
 			OPCODE_STORE: begin
@@ -1099,6 +1138,8 @@ module nerv #(
 				if (mem_rd_enable_q) begin
 					wr_rd = mem_rd_reg_q;
 					next_rd = mem_rdata;
+					wr_tag = mem_rd_tag_q; // Restores the tag for the memory read operation
+					next_tag = mem_rd_tag_q; // Restores the tag for the memory read operation
 				end
 			end
 `else
@@ -1108,6 +1149,8 @@ module nerv #(
 			cycle_late_wr = 1;
 			wr_rd = mem_rd_reg_q;
 			next_rd = mem_rdata;
+			wr_tag = mem_rd_tag_q;
+			next_tag = mem_rd_tag_q;
 `endif
 		end else if (irq_num!=0) begin
 			// if there's a pending IRQ, take it
@@ -1162,6 +1205,7 @@ module nerv #(
 			3'b 001 /* LH  */: begin mem_rdata = $signed(mem_rdata[15:0]); end
 			3'b 100 /* LBU */: begin mem_rdata = mem_rdata[7:0]; end
 			3'b 101 /* LHU */: begin mem_rdata = mem_rdata[15:0]; end
+			3'b 110 /* LWU */: begin mem_rdata = mem_rdata; end
 		endcase
 	end
 
@@ -1173,7 +1217,7 @@ module nerv #(
 		pc <= npc;
 
 		if (next_wr)
-			regfile[wr_rd] <= next_rd;
+			regfile[wr_rd] <= next_rd_canonical; // Enforces the canonical form invariant (zero/sign extended) upon write. 
 
 `ifdef NERV_RVFI
 		rvfi_valid <= next_rvfi_valid;
@@ -1320,5 +1364,39 @@ module nerv #(
 	wire [31:0] dbg_reg_x29 = regfile[29];
 	wire [31:0] dbg_reg_x30 = regfile[30];
 	wire [31:0] dbg_reg_x31 = regfile[31];
+
+ // Lets testbenches read tag values directly for verification
+	wire [2:0] dbg_tag_x0  = TAG_I32;
+	wire [2:0] dbg_tag_x1  = u_tagfile.tags[1];
+	wire [2:0] dbg_tag_x2  = u_tagfile.tags[2];
+	wire [2:0] dbg_tag_x3  = u_tagfile.tags[3];
+	wire [2:0] dbg_tag_x4  = u_tagfile.tags[4];
+	wire [2:0] dbg_tag_x5  = u_tagfile.tags[5];
+	wire [2:0] dbg_tag_x6  = u_tagfile.tags[6];
+	wire [2:0] dbg_tag_x7  = u_tagfile.tags[7];
+	wire [2:0] dbg_tag_x8  = u_tagfile.tags[8];
+	wire [2:0] dbg_tag_x9  = u_tagfile.tags[9];
+	wire [2:0] dbg_tag_x10 = u_tagfile.tags[10];
+	wire [2:0] dbg_tag_x11 = u_tagfile.tags[11];
+	wire [2:0] dbg_tag_x12 = u_tagfile.tags[12];
+	wire [2:0] dbg_tag_x13 = u_tagfile.tags[13];
+	wire [2:0] dbg_tag_x14 = u_tagfile.tags[14];
+	wire [2:0] dbg_tag_x15 = u_tagfile.tags[15];
+	wire [2:0] dbg_tag_x16 = u_tagfile.tags[16];
+	wire [2:0] dbg_tag_x17 = u_tagfile.tags[17];
+	wire [2:0] dbg_tag_x18 = u_tagfile.tags[18];
+	wire [2:0] dbg_tag_x19 = u_tagfile.tags[19];
+	wire [2:0] dbg_tag_x20 = u_tagfile.tags[20];
+	wire [2:0] dbg_tag_x21 = u_tagfile.tags[21];
+	wire [2:0] dbg_tag_x22 = u_tagfile.tags[22];
+	wire [2:0] dbg_tag_x23 = u_tagfile.tags[23];
+	wire [2:0] dbg_tag_x24 = u_tagfile.tags[24];
+	wire [2:0] dbg_tag_x25 = u_tagfile.tags[25];
+	wire [2:0] dbg_tag_x26 = u_tagfile.tags[26];
+	wire [2:0] dbg_tag_x27 = u_tagfile.tags[27];
+	wire [2:0] dbg_tag_x28 = u_tagfile.tags[28];
+	wire [2:0] dbg_tag_x29 = u_tagfile.tags[29];
+	wire [2:0] dbg_tag_x30 = u_tagfile.tags[30];
+	wire [2:0] dbg_tag_x31 = u_tagfile.tags[31];
 `endif
 endmodule

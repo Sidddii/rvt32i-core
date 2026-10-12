@@ -1,9 +1,23 @@
-/checks/
-/cexdata/
-/testbench.vcd
-/firmware.elf
-/firmware.hex
-/disasm.o
-/disasm.s
-/testbench
-/gtkwave.log
+# Build artifacts
+*.elf
+*.hex
+*.o
+*.s.o
+
+# Simulation binaries & dumps
+testbench
+tag_testbench_bin
+*.vcd
+gtkwave.log
+
+# Temporary checks
+disasm.o
+disasm.s
+checks/
+cexdata/
+
+# Documentation and reports (kept local)
+*.pdf
+RVT32I_Implementation_Report.md
+Git_Workflow_Guide.md
+

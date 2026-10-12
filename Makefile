@@ -15,7 +15,7 @@
 #  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 #  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-TOOLCHAIN_PREFIX?=riscv64-unknown-elf-
+TOOLCHAIN_PREFIX?=riscv64-elf-
 
 RISCV_ARCH?=rv32i$(shell $(TOOLCHAIN_PREFIX)as -march=rv32i_zicsr --dump-config 2>/dev/null && echo _zicsr)
 
@@ -28,8 +28,21 @@ firmware.elf: firmware.s vectors.s firmware.c
 firmware.hex: firmware.elf
 	$(TOOLCHAIN_PREFIX)objcopy -O verilog $< $@
 
-testbench: testbench.sv nerv.sv
-	iverilog -g2012 -o testbench -D STALL -D NERV_DBGREGS testbench.sv nerv.sv
+testbench: testbench.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
+	iverilog -g2012 -o testbench -D STALL -D NERV_DBGREGS testbench.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
+
+# ── Tagged Load Instruction Test ──────────────────────────────────────────────
+test_loads: test_loads.hex tag_testbench_bin
+	vvp -N tag_testbench_bin
+
+test_loads.elf: test_loads.s
+	$(TOOLCHAIN_PREFIX)gcc -march=$(RISCV_ARCH) -mabi=ilp32 -nostdlib -Ttext=0x0 -o $@ $^
+
+test_loads.hex: test_loads.elf
+	$(TOOLCHAIN_PREFIX)objcopy -O verilog $< $@
+
+tag_testbench_bin: tag_testbench.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
+	iverilog -g2012 -o tag_testbench_bin -D NERV_DBGREGS tag_testbench.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
 
 checks:
 	python3 ../../checks/genchecks.py
@@ -48,4 +61,5 @@ trace:
 
 clean:
 	rm -rf firmware.elf firmware.hex testbench testbench.vcd gtkwave.log
+	rm -rf test_loads.elf test_loads.hex tag_testbench_bin
 	rm -rf disasm.o disasm.s checks/ cexdata/
