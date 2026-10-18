@@ -458,7 +458,7 @@ module nerv #(
 	wire [6:0] insn_opcode;
 
 	// rs1 and rs2 are source for the instruction
-	wire [31:0] rs1_value = !insn_rs1 ? 0 : regfile[insn_rs1];
+	wire [31:0] rs1_value = !insn_rs1 ? 0 : regfile[insn_rs1]; // THis is how rs1_value and rs2_value are assigned.
 	wire [31:0] rs2_value = !insn_rs2 ? 0 : regfile[insn_rs2];
 
 	// Tag wires (Signals connecting registers to the tag pipeline) 
@@ -958,18 +958,33 @@ module nerv #(
 			end
 			// store to memory instructions: Store Byte, Store Halfword, Store Word
 			OPCODE_STORE: begin
-				mem_wr_addr = rs1_value + imm_s_sext;
+				mem_wr_addr = rs1_value + imm_s_sext; // Address = rs1 + offset
 				casez ({insn_funct3, mem_wr_addr[1:0]})
 					5'b 000_zz /* SB */,
 					5'b 001_z0 /* SH */,
 					5'b 010_00 /* SW */: begin
 						mem_wr_enable = 1;
-						mem_wr_data = rs2_value;
+						mem_wr_data = rs2_value; // taking the data from rs2 to send to memory
 						mem_wr_strb = 4'b 1111;
 						case (insn_funct3)
-							3'b 000 /* SB  */: begin mem_wr_strb = 4'b 0001; end
-							3'b 001 /* SH  */: begin mem_wr_strb = 4'b 0011; end
-							3'b 010 /* SW  */: begin mem_wr_strb = 4'b 1111; end
+							3'b 000 /* ST  */: begin
+							// 1. 
+							case (rs2_tag)
+								TAG_U8,  TAG_I8:  begin mem_wr_strb = 4'b 0001; end // if rs2 is 8 bit tag, then turn on 1 byte switch
+								TAG_U16, TAG_I16: begin mem_wr_strb = 4'b 0011; end // if rs2 is 16 bit tag, then turn on 2 byte switch
+								TAG_U32, TAG_I32: begin mem_wr_strb = 4'b 1111; end // if rs2 is 32 bit tag, then turn on 4 byte switch		
+								default: begin illinsn = 1; mem_wr_enable = 0; end // if rs2 is not a valid tag, then illegal instruction
+							endcase
+							
+							// 2. Address alignment
+
+							end
+
+
+							//3'b 000 /* SB  */: begin mem_wr_strb = 4'b 0001; end
+							3'b 001 /* SH  */: begin mem_wr_strb = 4'b 0011; end // kept for current testing
+							3'b 010 /* SW  */: begin mem_wr_strb = 4'b 1111; end // kept for current testing
+								
 						endcase
 						mem_wr_data = mem_wr_data << (8*mem_wr_addr[1:0]);
 						mem_wr_strb = mem_wr_strb << mem_wr_addr[1:0];
