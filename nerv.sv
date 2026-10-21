@@ -977,6 +977,21 @@ module nerv #(
 							endcase
 							
 							// 2. Address alignment
+							case (rs2_tag)
+								TAG_U16, TAG_I16: begin
+									if (mem_wr_addr[0] != 1'b0) begin
+										illinsn = 1;
+										mem_wr_enable = 0;
+									end
+								end
+								TAG_U32, TAG_I32: begin
+									if (mem_wr_addr[1:0] != 2'b00) begin
+										illinsn = 1;
+										mem_wr_enable = 0;
+									end
+								end
+								default: ; // 8-bit tags (U8/I8) are always aligned
+							endcase
 
 							end
 
