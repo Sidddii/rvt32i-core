@@ -468,6 +468,12 @@ module nerv #(
 	reg  [2:0]  wr_tag;
 	wire [31:0] next_rd_canonical;
 
+	//Promotion Rule for ALU if either tag is u32, then the result is u32, else the result is i32.
+
+	function automatic [2:0] tag_promote(input [2:0] t1, input [2:0] t2);
+		tag_promote = (t1 == TAG_U32 || t2 == TAG_U32) ? TAG_U32 : TAG_I32;
+	endfunction
+
 	// split R-type instruction - see section 2.2 of RiscV spec
 	assign {insn_funct7, insn_rs2, insn_rs1, insn_funct3, insn_rd, insn_opcode} = insn;
 
