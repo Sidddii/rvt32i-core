@@ -1063,16 +1063,22 @@ module nerv #(
 			// ALU instructions: Add, Subtract, Shift Left Logical, Set Left Than, Set Less Than Unsigned, XOR, Shift Right Logical,
 			// Shift Right Arithmetic, OR, AND
 				case ({insn_funct7, insn_funct3})
-					10'b 0000000_000 /* ADD  */: begin next_wr = 1; next_rd = rs1_value + rs2_value; end
-					10'b 0100000_000 /* SUB  */: begin next_wr = 1; next_rd = rs1_value - rs2_value; end
+				// 1C tag promotion b/w rs1 reg and rs2 currently for add, sub, xor, or, and
+					10'b 0000000_000 /* ADD  */: begin next_wr = 1; next_rd = rs1_value + rs2_value; 
+					wr_tag = tag_promote(rs1_tag, rs2_tag); end
+					10'b 0100000_000 /* SUB  */: begin next_wr = 1; next_rd = rs1_value - rs2_value; 
+					wr_tag = tag_promote(rs1_tag, rs2_tag); end
 					10'b 0000000_001 /* SLL  */: begin next_wr = 1; next_rd = rs1_value << rs2_value[4:0]; end
 					10'b 0000000_010 /* SLT  */: begin next_wr = 1; next_rd = $signed(rs1_value) < $signed(rs2_value); end
 					10'b 0000000_011 /* SLTU */: begin next_wr = 1; next_rd = rs1_value < rs2_value; end
-					10'b 0000000_100 /* XOR  */: begin next_wr = 1; next_rd = rs1_value ^ rs2_value; end
+					10'b 0000000_100 /* XOR  */: begin next_wr = 1; next_rd = rs1_value ^ rs2_value; 
+					wr_tag = tag_promote(rs1_tag, rs2_tag); end
 					10'b 0000000_101 /* SRL  */: begin next_wr = 1; next_rd = rs1_value >> rs2_value[4:0]; end
 					10'b 0100000_101 /* SRA  */: begin next_wr = 1; next_rd = $signed(rs1_value) >>> rs2_value[4:0]; end
-					10'b 0000000_110 /* OR   */: begin next_wr = 1; next_rd = rs1_value | rs2_value; end
-					10'b 0000000_111 /* AND  */: begin next_wr = 1; next_rd = rs1_value & rs2_value; end
+					10'b 0000000_110 /* OR   */: begin next_wr = 1; next_rd = rs1_value | rs2_value; 
+					wr_tag = tag_promote(rs1_tag, rs2_tag); end
+					10'b 0000000_111 /* AND  */: begin next_wr = 1; next_rd = rs1_value & rs2_value; 
+					wr_tag = tag_promote(rs1_tag, rs2_tag); end
 					// Zba: Address generation
 					10'b 0010000_010 /* SH1ADD */: begin next_wr = 1; next_rd = rs2_value + {rs1_value[30:0], 1'b 0}; end
 					10'b 0010000_100 /* SH2ADD */: begin next_wr = 1; next_rd = rs2_value + {rs1_value[29:0], 2'b 0}; end
