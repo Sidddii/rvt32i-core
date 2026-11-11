@@ -470,9 +470,10 @@ module nerv #(
 
 	//Promotion Rule for ALU if either tag is u32, then the result is u32, else the result is i32.
 
-	function automatic [2:0] tag_promote(input [2:0] t1, input [2:0] t2);
+	function automatic [2:0] tag_promote(input [2:0] t1, input [2:0] t2); // Implements the promotion rule from Baig thesis
 		tag_promote = (t1 == TAG_U32 || t2 == TAG_U32) ? TAG_U32 : TAG_I32;
 	endfunction
+
 
 	// split R-type instruction - see section 2.2 of RiscV spec
 	assign {insn_funct7, insn_rs2, insn_rs1, insn_funct3, insn_rd, insn_opcode} = insn;
@@ -1025,9 +1026,18 @@ module nerv #(
 					10'b zzzzzzz_100 /* XORI  */: begin next_wr = 1; next_rd = rs1_value ^ imm_i_sext; wr_tag = tag_promote(rs1_tag, TAG_I32); end
 					10'b zzzzzzz_110 /* ORI   */: begin next_wr = 1; next_rd = rs1_value | imm_i_sext; wr_tag = tag_promote(rs1_tag, TAG_I32); end
 					10'b zzzzzzz_111 /* ANDI  */: begin next_wr = 1; next_rd = rs1_value & imm_i_sext; wr_tag = tag_promote(rs1_tag, TAG_I32); end
-					10'b 0000000_001 /* SLLI  */: begin next_wr = 1; next_rd = rs1_value << insn[24:20]; end
-					10'b 0000000_101 /* SRLI  */: begin next_wr = 1; next_rd = rs1_value >> insn[24:20]; end
-					10'b 0100000_101 /* SRAI  */: begin next_wr = 1; next_rd = $signed(rs1_value) >>> insn[24:20]; end
+
+				// Step 2A Shifts (Immediate) - shifts rs1 value left by immediate amnt, destination keeps rs1_tag
+					10'b 0000000_001 /* SLI   */: begin next_wr = 1; next_rd = rs1_value << insn[24:20]; wr_tag = rs1_tag; end // The output register keeps the exact same tag as rs1
+					10'b 0000000_101 /* SRI   */,
+					10'b 0100000_101 /* SRI (compat) */: begin // RISC-V spec allows for both 0000000 and 0100000 funct7 for SRI, but the latter is reserved for future use, We will allow it for compatibility.
+						next_wr = 1; 
+						// Tag bit 2 selects: 1 = Signed, 0 = Unsigned
+						// If rs1_tag[2] is 1 (signed) = does arithmetic shift, which keeps negative numbers negative by copying the sign bit. 
+						// If rs1_tag[2] is 0 (unsigned) = does logical shift, which just fills with zeros
+						next_rd = rs1_tag[2] ? ($signed(rs1_value) >>> insn[24:20]) : (rs1_value >> insn[24:20]); 
+						wr_tag = rs1_tag; // output keeps the rs1 tag
+					end
 
 					// Zbb: Basic bit-manipulation
 					10'b 0110000_001: begin
@@ -1068,13 +1078,21 @@ module nerv #(
 					wr_tag = tag_promote(rs1_tag, rs2_tag); end
 					10'b 0100000_000 /* SUB  */: begin next_wr = 1; next_rd = rs1_value - rs2_value; 
 					wr_tag = tag_promote(rs1_tag, rs2_tag); end
-					10'b 0000000_001 /* SLL  */: begin next_wr = 1; next_rd = rs1_value << rs2_value[4:0]; end
+
+				// Step 2B: Shifts (Register) = destination takes rs1_tag
+					10'b 0000000_001 /* SL   */: begin next_wr = 1; next_rd = rs1_value << rs2_value[4:0]; wr_tag = rs1_tag; end // shifts rs1 left by the amount specified in rs2[4:0] and keeps the same tag as rs1
 					10'b 0000000_010 /* SLT  */: begin next_wr = 1; next_rd = $signed(rs1_value) < $signed(rs2_value); end
 					10'b 0000000_011 /* SLTU */: begin next_wr = 1; next_rd = rs1_value < rs2_value; end
 					10'b 0000000_100 /* XOR  */: begin next_wr = 1; next_rd = rs1_value ^ rs2_value; 
+
 					wr_tag = tag_promote(rs1_tag, rs2_tag); end
-					10'b 0000000_101 /* SRL  */: begin next_wr = 1; next_rd = rs1_value >> rs2_value[4:0]; end
-					10'b 0100000_101 /* SRA  */: begin next_wr = 1; next_rd = $signed(rs1_value) >>> rs2_value[4:0]; end
+					10'b 0000000_101 /* SR   */,
+					10'b 0100000_101 /* SR (compat)  */: begin 
+						next_wr = 1; 
+						// Tag bit 2 selects: 1 = Signed arithmetic, 0 = Unsigned logical
+						next_rd = rs1_tag[2] ? ($signed(rs1_value) >>> rs2_value[4:0]) : (rs1_value >> rs2_value[4:0]); //  Kinda same thing as SRI which we did above, but using rs2 register instead of immediate
+						wr_tag = rs1_tag; // Final tag is the rs1 tag.
+					end
 					10'b 0000000_110 /* OR   */: begin next_wr = 1; next_rd = rs1_value | rs2_value; 
 					wr_tag = tag_promote(rs1_tag, rs2_tag); end
 					10'b 0000000_111 /* AND  */: begin next_wr = 1; next_rd = rs1_value & rs2_value; 
