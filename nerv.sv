@@ -1019,10 +1019,27 @@ module nerv #(
 			// OR Immediate, And Immediate, Shift Left Logical Immediate, Shift Right Logical Immediate, Shift Right Arithmetic Immediate
 			OPCODE_OP_IMM: begin
 				casez ({insn_funct7, insn_funct3})
+
 				// Step 1B
 					10'b zzzzzzz_000 /* ADDI  */: begin next_wr = 1; next_rd = rs1_value + imm_i_sext; wr_tag = tag_promote(rs1_tag, TAG_I32); end // tag promotion with immediate i32 tag in addi, xori, ori, andi
-					10'b zzzzzzz_010 /* SLTI  */: begin next_wr = 1; next_rd = $signed(rs1_value) < $signed(imm_i_sext); end
-					10'b zzzzzzz_011 /* SLTIU */: begin next_wr = 1; next_rd = rs1_value < imm_i_sext; end
+
+
+				// In standard RISC-V, SLTI is signed and SLTIU is unsigned. In RVT32I, they are unified.
+
+				// Step 3A: Comparisons (Immediate) = compares rs1 against immediate, result tag is always I32
+
+					10'b zzzzzzz_010 /* SLTI  */,
+					10'b zzzzzzz_011 /* SLTIU (compat) */: begin 
+
+						next_wr = 1; 
+
+						// Tag bit 2 check: if rs1 is signed (bit 2 is 1) do signed comparison, else unsigned comparison
+						// SLTIU kept for compatibility if compiler emits it (NEED TO LOOK FURTHER IN THIS)
+						next_rd = rs1_tag[2] ? ($signed(rs1_value) < $signed(imm_i_sext)) : (rs1_value < imm_i_sext);
+						 
+						wr_tag = TAG_I32; // output tag is always I32 for comparison instructions
+					end
+
 					10'b zzzzzzz_100 /* XORI  */: begin next_wr = 1; next_rd = rs1_value ^ imm_i_sext; wr_tag = tag_promote(rs1_tag, TAG_I32); end
 					10'b zzzzzzz_110 /* ORI   */: begin next_wr = 1; next_rd = rs1_value | imm_i_sext; wr_tag = tag_promote(rs1_tag, TAG_I32); end
 					10'b zzzzzzz_111 /* ANDI  */: begin next_wr = 1; next_rd = rs1_value & imm_i_sext; wr_tag = tag_promote(rs1_tag, TAG_I32); end
@@ -1081,8 +1098,21 @@ module nerv #(
 
 				// Step 2B: Shifts (Register) = destination takes rs1_tag
 					10'b 0000000_001 /* SL   */: begin next_wr = 1; next_rd = rs1_value << rs2_value[4:0]; wr_tag = rs1_tag; end // shifts rs1 left by the amount specified in rs2[4:0] and keeps the same tag as rs1
-					10'b 0000000_010 /* SLT  */: begin next_wr = 1; next_rd = $signed(rs1_value) < $signed(rs2_value); end
-					10'b 0000000_011 /* SLTU */: begin next_wr = 1; next_rd = rs1_value < rs2_value; end
+
+				// Step 3B: Comparisons (Register) - compares rs1 and rs2, result tag is I32
+					10'b 0000000_010 /* SLT   */,
+					10'b 0000000_011 /* SLTU (compat)  */: begin 
+
+						next_wr = 1; 
+
+						// If either tag is unsigned (bit 2 is 0) we do unsigned comparison (<)
+						// If both are signed we do signed comparison ($signed < $signed)
+
+						next_rd = (!rs1_tag[2] || !rs2_tag[2]) ? (rs1_value < rs2_value) : ($signed(rs1_value) < $signed(rs2_value)); 
+
+						wr_tag = TAG_I32; // Final tag is I32 since the result of a comparison is always a 32-bit integer (0 or 1)
+					end
+
 					10'b 0000000_100 /* XOR  */: begin next_wr = 1; next_rd = rs1_value ^ rs2_value; 
 
 					wr_tag = tag_promote(rs1_tag, rs2_tag); end
