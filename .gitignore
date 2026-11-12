@@ -7,6 +7,9 @@
 # Simulation binaries & dumps
 testbench
 tag_testbench_bin
+tag_testbench_stores_bin
+test_memcpy_bin
+test_fibonacci_bin
 *.vcd
 gtkwave.log
 

@@ -44,6 +44,46 @@ test_loads.hex: test_loads.elf
 tag_testbench_bin: tag_testbench.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
 	iverilog -g2012 -o tag_testbench_bin -D NERV_DBGREGS tag_testbench.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
 
+# ── Tagged Store Instruction Test ─────────────────────────────────────────────
+test_stores: test_stores.hex tag_testbench_stores_bin
+	vvp -N tag_testbench_stores_bin
+
+test_stores.elf: test_stores.s
+	$(TOOLCHAIN_PREFIX)gcc -march=$(RISCV_ARCH) -mabi=ilp32 -nostdlib -Ttext=0x0 -o $@ $^
+
+test_stores.hex: test_stores.elf
+	$(TOOLCHAIN_PREFIX)objcopy -O verilog $< $@
+
+tag_testbench_stores_bin: tag_testbench_stores.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
+	iverilog -g2012 -o tag_testbench_stores_bin -D NERV_DBGREGS tag_testbench_stores.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
+
+# ── Alfageme memcpy Benchmark ─────────────────────────────────────────────────
+test_memcpy: test_memcpy.hex test_memcpy_bin
+	vvp -N test_memcpy_bin
+
+test_memcpy.elf: test_memcpy.s
+	$(TOOLCHAIN_PREFIX)gcc -march=$(RISCV_ARCH) -mabi=ilp32 -nostdlib -Ttext=0x0 -o $@ $^
+
+test_memcpy.hex: test_memcpy.elf
+	$(TOOLCHAIN_PREFIX)objcopy -O verilog $< $@
+
+test_memcpy_bin: tag_testbench_memcpy.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
+	iverilog -g2012 -o test_memcpy_bin -D NERV_DBGREGS tag_testbench_memcpy.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
+
+# ── Baig & Dalsgaard Fibonacci Benchmark ──────────────────────────────────────
+test_fibonacci: test_fibonacci.hex test_fibonacci_bin
+	vvp -N test_fibonacci_bin
+
+test_fibonacci.elf: test_fibonacci.s
+	$(TOOLCHAIN_PREFIX)gcc -march=$(RISCV_ARCH) -mabi=ilp32 -nostdlib -Ttext=0x0 -o $@ $^
+
+test_fibonacci.hex: test_fibonacci.elf
+	$(TOOLCHAIN_PREFIX)objcopy -O verilog $< $@
+
+test_fibonacci_bin: tag_testbench_fibonacci.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
+	iverilog -g2012 -o test_fibonacci_bin -D NERV_DBGREGS tag_testbench_fibonacci.sv nerv.sv tag_regfile.sv tag_canonicalizer.sv
+
+
 checks:
 	python3 ../../checks/genchecks.py
 	$(MAKE) -C checks
@@ -62,4 +102,7 @@ trace:
 clean:
 	rm -rf firmware.elf firmware.hex testbench testbench.vcd gtkwave.log
 	rm -rf test_loads.elf test_loads.hex tag_testbench_bin
+	rm -rf test_stores.elf test_stores.hex tag_testbench_stores_bin
+	rm -rf test_memcpy.elf test_memcpy.hex test_memcpy_bin
+	rm -rf test_fibonacci.elf test_fibonacci.hex test_fibonacci_bin
 	rm -rf disasm.o disasm.s checks/ cexdata/
