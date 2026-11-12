@@ -474,6 +474,11 @@ module nerv #(
 		tag_promote = (t1 == TAG_U32 || t2 == TAG_U32) ? TAG_U32 : TAG_I32;
 	endfunction
 
+	// Check if a tag is reserved/illegal (tags 3'b011 and 3'b111)
+	function automatic logic is_reserved_tag(input [2:0] t); // Since the reserved tags are 3'b011 and 3'b111, we can check if the tag is reserved by checking if the tag is equal to either of these values.
+		is_reserved_tag = (t == 3'b011 || t == 3'b111); // As RVT32I uses 3 bit tags. Only 6 are valid types (U8, U16, U32, I8, I16, I32). The other two (011 and 111) are strictly illegal or reserved.
+	endfunction
+
 
 	// split R-type instruction - see section 2.2 of RiscV spec
 	assign {insn_funct7, insn_rs2, insn_rs1, insn_funct3, insn_rd, insn_opcode} = insn;
@@ -1017,7 +1022,9 @@ module nerv #(
 			end
 			// immediate ALU instructions: Add Immediate, Set Less Than Immediate, Set Less Than Immediate Unsigned, XOR Immediate,
 			// OR Immediate, And Immediate, Shift Left Logical Immediate, Shift Right Logical Immediate, Shift Right Arithmetic Immediate
+
 			OPCODE_OP_IMM: begin
+				if (is_reserved_tag(rs1_tag)) illinsn = 1; // traps if rs1 has illegal tag (011 or 111) as per reference thesis
 				casez ({insn_funct7, insn_funct3})
 
 				// Step 1B
@@ -1087,6 +1094,9 @@ module nerv #(
 				endcase
 			end
 			OPCODE_OP: begin
+
+				if (is_reserved_tag(rs1_tag) || is_reserved_tag(rs2_tag)) illinsn = 1; // traps if rs1 or rs2 has illegal tag as per reference thesis help
+				
 			// ALU instructions: Add, Subtract, Shift Left Logical, Set Left Than, Set Less Than Unsigned, XOR, Shift Right Logical,
 			// Shift Right Arithmetic, OR, AND
 				case ({insn_funct7, insn_funct3})
